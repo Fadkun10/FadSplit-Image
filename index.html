@@ -483,8 +483,12 @@
 
             try {
                 const zip = new JSZip();
-                const folderName = `FadSplit_${originalFile.name.split('.')[0]}`;
-                const imgFolder = zip.folder(folderName);
+                
+                // Mendapatkan nama file asli tanpa ekstensi untuk penamaan
+                const originalName = originalFile.name;
+                const lastDotIndex = originalName.lastIndexOf('.');
+                const baseName = lastDotIndex !== -1 ? originalName.substring(0, lastDotIndex) : originalName;
+                const zipFileName = `FadSplit-Image_${baseName}.zip`;
                 
                 // Gunakan off-screen canvas untuk memotong (kualitas asli)
                 const canvas = document.createElement('canvas');
@@ -528,16 +532,14 @@
                 });
 
                 // Penamaan urutan file: NamaFileAsli_Kolom|Baris (misal: Foto kenangan_1|3.jpg)
-                const originalName = originalFile.name;
-                const lastDotIndex = originalName.lastIndexOf('.');
-                const baseName = lastDotIndex !== -1 ? originalName.substring(0, lastDotIndex) : originalName;
                 const fileName = `${baseName}_${c+1}|${r+1}.${extension}`;
                 
                 if (selectedCells.length === 1) {
                     singleBlob = blob;
                     singleFileName = fileName;
                 } else {
-                    imgFolder.file(fileName, blob);
+                    // Memasukkan file langsung ke root ZIP, TANPA folder ganda
+                    zip.file(fileName, blob);
                 }
             }
 
@@ -550,8 +552,8 @@
                 splitBtn.innerHTML = '<span class="spinner"></span> Menyimpan ZIP...';
                 const zipBlob = await zip.generateAsync({ type: 'blob' });
                 
-                // Unduh file zip
-                saveAs(zipBlob, `${folderName}.zip`);
+                // Unduh file zip dengan format nama yang baru
+                saveAs(zipBlob, zipFileName);
                 showToast(`Berhasil dipotong & diunduh ${selectedCells.length} bagian (ZIP)!`);
             }
             
