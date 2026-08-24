@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FadSplit-Image - Pemotong Gambar Kualitas Tinggi</title>
+    <!-- Tailwind CSS untuk styling yang modern dan responsif -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Konfigurasi Tailwind untuk mengaktifkan class-based Dark Mode -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <!-- Font Inter untuk tipografi yang rapi -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- JSZip untuk membuat file zip langsung dari browser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- FileSaver untuk menyimpan file zip ke perangkat pengguna -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    
+    <!-- Mencegah kilatan terang (flash) sebelum memuat tema -->
+    <script>
+        if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        
+        /* Pola background untuk Dark Mode */
+        .dark body {
+            background-color: #111827; 
+            background-image: radial-gradient(#374151 1px, transparent 1px);
+        }
+        
+        .preview-container {
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
+        }
+        .preview-image {
+            max-width: 100%;
+            max-height: 60vh;
+            display: block;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .grid-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: auto; /* Diubah jadi auto agar bisa di-klik */
+            display: grid;
+            border: 2px solid rgba(59, 130, 246, 0.8); /* Warna border luar */
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+        .grid-cell {
+            border-right: 1px dashed rgba(255, 255, 255, 0.9);
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.9);
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2); /* Memberikan kontras pada garis */
+            transition: all 0.2s;
+            cursor: pointer;
+            position: relative;
+        }
+        /* Menghilangkan border pada ujung kanan dan bawah */
+        .grid-cell.right-edge { border-right: none; }
+        .grid-cell.bottom-edge { border-bottom: none; }
+        
+        /* State saat potongan dipilih */
+        .grid-cell.selected {
+            background-color: rgba(59, 130, 246, 0.25);
+        }
+        .grid-cell.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: clamp(1.5rem, 5vw, 3rem);
+            font-weight: bold;
+            text-shadow: 0 2px 5px rgba(0,0,0,0.8);
+            opacity: 0.9;
+        }
+        .grid-cell:hover {
+            background-color: rgba(59, 130, 246, 0.4);
+        }
+        
+        /* Animasi loading */
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid white;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-gray-800 dark:text-gray-200 min-h-screen flex flex-col items-center py-10 px-4 sm:px-6 lg:px-8 transition-colors duration-200">
+
+    <!-- Tombol Toggle Tema -->
+    <div class="absolute top-4 right-4 sm:top-6 sm:right-6">
+        <button id="theme-toggle" type="button" class="text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-2.5 transition-colors">
+            <svg id="theme-toggle-dark-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
+            <svg id="theme-toggle-light-icon" class="hidden w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
+        </button>
+    </div>
+
+    <header class="text-center mb-8 w-full max-w-5xl">
+        <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight mb-2">
+            <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">FadSplit</span>-Image
+        </h1>
+        <p class="text-gray-500 dark:text-gray-400 text-lg max-w-2xl mx-auto">Potong gambar Anda menjadi beberapa bagian sama besar dengan cepat tanpa mengurangi kualitas aslinya.</p>
+    </header>
+
+    <main class="w-full max-w-6xl bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden flex flex-col lg:flex-row border border-gray-100 dark:border-gray-700 transition-colors duration-200">
+        
+        <!-- Panel Kiri: Kontrol & Input -->
+        <div class="w-full lg:w-1/3 bg-gray-50 dark:bg-gray-800/50 p-6 sm:p-8 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700 flex flex-col gap-6 transition-colors duration-200">
+            
+            <!-- Upload Area -->
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">1. Unggah Gambar</label>
+                <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-xl hover:border-blue-500 dark:hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer group" id="drop-zone" onclick="document.getElementById('file-upload').click()">
+                    <div class="space-y-1 text-center">
+                        <svg class="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <div class="flex text-sm text-gray-600 dark:text-gray-400 justify-center">
+                            <label for="file-upload" class="relative cursor-pointer bg-transparent rounded-md font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
+                                <span>Pilih file</span>
+                                <input id="file-upload" name="file-upload" type="file" class="sr-only" accept="image/*">
+                            </label>
+                            <p class="pl-1">atau seret ke sini</p>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400" id="file-name-display">PNG, JPG, JPEG hingga resolusi tinggi</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Konfigurasi Potongan -->
+            <div class="space-y-4 opacity-50 pointer-events-none transition-opacity duration-300" id="config-panel">
+                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300">2. Atur Potongan</label>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="cols" class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Kolom (Mendatar)</label>
+                        <input type="number" id="cols" name="cols" min="1" max="20" value="2" class="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 dark:border-gray-600 rounded-md border p-2 bg-white dark:bg-gray-700 dark:text-white transition-colors duration-200">
+                    </div>
+                    <div>
+                        <label for="rows" class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Baris (Menurun)</label>
+                        <input type="number" id="rows" name="rows" min="1" max="20" value="2" class="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 dark:border-gray-600 rounded-md border p-2 bg-white dark:bg-gray-700 dark:text-white transition-colors duration-200">
+                    </div>
+                </div>
+
+                <div class="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-lg border border-blue-100 dark:border-blue-800/50 mt-2 transition-colors duration-200">
+                    <p class="text-xs text-blue-800 dark:text-blue-300">
+                        <span class="font-bold">Info:</span> Gambar akan dipotong menjadi <strong id="total-pieces">4</strong> bagian sama besar.<br>
+                        <span class="font-medium mt-1 inline-block">Klik pada bagian gambar di area pratinjau untuk memilih/membatalkan potongan yang ingin diunduh.</span>
+                    </p>
+                </div>
+            </div>
+
+            <!-- Tombol Aksi -->
+            <div class="mt-auto pt-4 border-t border-gray-200 dark:border-gray-700 transition-colors duration-200">
+                <button id="split-btn" disabled class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                    Potong & Unduh ZIP
+                </button>
+            </div>
+            
+        </div>
+
+        <!-- Panel Kanan: Pratinjau -->
+        <div class="w-full lg:w-2/3 p-6 sm:p-8 flex flex-col items-center justify-center min-h-[400px] bg-white dark:bg-gray-800 relative transition-colors duration-200">
+            
+            <div id="empty-state" class="text-center text-gray-400 dark:text-gray-500 flex flex-col items-center justify-center">
+                <svg class="h-16 w-16 mb-4 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <p class="text-lg font-medium text-gray-500 dark:text-gray-400">Pratinjau Gambar</p>
+                <p class="text-sm">Silakan unggah gambar terlebih dahulu</p>
+            </div>
+
+            <div id="preview-section" class="hidden flex-col items-center w-full">
+                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4 self-start">Pratinjau Pemotongan:</h3>
+                <div class="preview-container" id="preview-container">
+                    <img id="image-preview" src="" alt="Pratinjau" class="preview-image">
+                    <div id="grid-overlay" class="grid-overlay"></div>
+                </div>
+                
+                <div class="mt-4 flex gap-6 text-sm text-gray-600 dark:text-gray-400 w-full justify-center bg-gray-50 dark:bg-gray-700/50 py-2 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors duration-200">
+                    <div>Resolusi Asli: <strong id="original-res" class="text-gray-900 dark:text-white">-</strong></div>
+                    <div>Resolusi per Potongan: <strong id="piece-res" class="text-blue-600 dark:text-blue-400">-</strong></div>
+                </div>
+
+                <!-- Kontrol Pilihan Potongan -->
+                <div class="mt-4 flex flex-col items-center w-full bg-white dark:bg-gray-700/30 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm transition-colors duration-200">
+                    <div class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                        Bagian yang akan diunduh: <strong id="selected-count-text" class="text-blue-600 dark:text-blue-400 text-lg">0</strong> <span class="text-gray-400 dark:text-gray-500 text-xs font-normal">/ <span id="total-count-text">0</span> total</span>
+                    </div>
+                    <div class="flex gap-3">
+                        <button id="btn-select-all" class="px-4 py-1.5 text-xs font-semibold text-white bg-blue-500 rounded-md hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-500 transition-colors shadow-sm">Pilih Semua</button>
+                        <button id="btn-deselect-all" class="px-4 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-sm">Batal Pilih</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Toast Notifikasi (Tersembunyi secara default) -->
+            <div id="toast" class="absolute top-4 right-4 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 px-4 py-2 rounded shadow-lg transform transition-transform duration-300 translate-y-[-150%] opacity-0 flex items-center z-50">
+                <svg class="w-5 h-5 text-green-400 dark:text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                <span id="toast-message">Berhasil!</span>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // DOM Elements
+        const fileUpload = document.getElementById('file-upload');
+        const dropZone = document.getElementById('drop-zone');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const configPanel = document.getElementById('config-panel');
+        const colsInput = document.getElementById('cols');
+        const rowsInput = document.getElementById('rows');
+        const totalPiecesText = document.getElementById('total-pieces');
+        const splitBtn = document.getElementById('split-btn');
+        const emptyState = document.getElementById('empty-state');
+        const previewSection = document.getElementById('preview-section');
+        const imagePreview = document.getElementById('image-preview');
+        const gridOverlay = document.getElementById('grid-overlay');
+        const originalResText = document.getElementById('original-res');
+        const pieceResText = document.getElementById('piece-res');
+        
+        // Elemen baru untuk fitur seleksi
+        const selectedCountText = document.getElementById('selected-count-text');
+        const totalCountText = document.getElementById('total-count-text');
+        const btnSelectAll = document.getElementById('btn-select-all');
+        const btnDeselectAll = document.getElementById('btn-deselect-all');
+        
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toast-message');
+
+        // Toggle Tema Dark/Light Mode
+        const themeToggleBtn = document.getElementById('theme-toggle');
+        const themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
+        const themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
+
+        // Setup awal ikon
+        if (document.documentElement.classList.contains('dark')) {
+            themeToggleLightIcon.classList.remove('hidden');
+        } else {
+            themeToggleDarkIcon.classList.remove('hidden');
+        }
+
+        // Event saat tombol tema diklik
+        themeToggleBtn.addEventListener('click', function() {
+            themeToggleDarkIcon.classList.toggle('hidden');
+            themeToggleLightIcon.classList.toggle('hidden');
+
+            if (document.documentElement.classList.contains('dark')) {
+                document.documentElement.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+            } else {
+                document.documentElement.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+            }
+        });
+
+        // State variables
+        let currentImage = null;
+        let originalFile = null;
+        let imgWidth = 0;
+        let imgHeight = 0;
+
+        // Event Listeners untuk Drag and Drop
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.add('border-blue-500', 'bg-blue-50', 'dark:border-blue-400', 'dark:bg-blue-900/20');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50', 'dark:border-blue-400', 'dark:bg-blue-900/20');
+            }, false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            let dt = e.dataTransfer;
+            let files = dt.files;
+            if (files.length > 0) handleFile(files[0]);
+        });
+
+        // Event Listener untuk input file konvensional
+        fileUpload.addEventListener('change', function(e) {
+            if (this.files && this.files[0]) {
+                handleFile(this.files[0]);
+            }
+        });
+
+        // Event Listeners untuk konfigurasi input (Kolom & Baris)
+        colsInput.addEventListener('input', updateGridPreview);
+        rowsInput.addEventListener('input', updateGridPreview);
+
+        function handleFile(file) {
+            if (!file.type.match('image.*')) {
+                showToast("Tolong unggah file gambar (JPG, PNG).", true);
+                return;
+            }
+
+            originalFile = file;
+            fileNameDisplay.textContent = file.name;
+            
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                // Memuat gambar ke objek Image memory
+                currentImage = new Image();
+                currentImage.onload = function() {
+                    // Menyimpan resolusi asli
+                    imgWidth = currentImage.naturalWidth;
+                    imgHeight = currentImage.naturalHeight;
+                    
+                    // Update UI
+                    imagePreview.src = e.target.result;
+                    emptyState.classList.add('hidden');
+                    previewSection.classList.remove('hidden');
+                    previewSection.classList.add('flex');
+                    
+                    // Aktifkan panel konfigurasi
+                    configPanel.classList.remove('opacity-50', 'pointer-events-none');
+                    splitBtn.disabled = false;
+                    
+                    originalResText.textContent = `${imgWidth} × ${imgHeight} px`;
+                    
+                    // Menyiapkan grid
+                    updateGridPreview();
+                }
+                currentImage.src = e.target.result;
+            }
+            
+            reader.readAsDataURL(file);
+        }
+
+        function updateGridPreview() {
+            if (!currentImage) return;
+
+            let cols = parseInt(colsInput.value);
+            let rows = parseInt(rowsInput.value);
+            
+            // Validasi input
+            if (isNaN(cols) || cols < 1) { cols = 1; colsInput.value = 1; }
+            if (isNaN(rows) || rows < 1) { rows = 1; rowsInput.value = 1; }
+            if (cols > 20) { cols = 20; colsInput.value = 20; }
+            if (rows > 20) { rows = 20; rowsInput.value = 20; }
+
+            const totalCells = cols * rows;
+            totalPiecesText.textContent = totalCells;
+            totalCountText.textContent = totalCells;
+
+            // Hitung ukuran per potongan
+            const pieceWidth = Math.floor(imgWidth / cols);
+            const pieceHeight = Math.floor(imgHeight / rows);
+            pieceResText.textContent = `${pieceWidth} × ${pieceHeight} px`;
+
+            // Buat overlay visual (CSS Grid)
+            gridOverlay.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+            gridOverlay.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+            gridOverlay.innerHTML = ''; // Bersihkan grid sebelumnya
+
+            for (let i = 0; i < totalCells; i++) {
+                const cell = document.createElement('div');
+                // Berikan class selected secara default
+                cell.className = 'grid-cell selected';
+                
+                // Menyimpan info baris dan kolom untuk proses pemotongan spesifik
+                const r = Math.floor(i / cols);
+                const c = i % cols;
+                cell.dataset.row = r;
+                cell.dataset.col = c;
+                
+                // Hapus border di tepi kanan dan bawah untuk estetika
+                if ((i + 1) % cols === 0) cell.classList.add('right-edge');
+                if (i >= totalCells - cols) cell.classList.add('bottom-edge');
+                
+                // Event listener untuk memilih/membatalkan potongan saat diklik
+                cell.addEventListener('click', function() {
+                    this.classList.toggle('selected');
+                    updateSelectionUI();
+                });
+                
+                gridOverlay.appendChild(cell);
+            }
+            
+            // Update tampilan tombol pertama kali grid dibuat
+            updateSelectionUI();
+        }
+
+        // Fungsi untuk memperbarui UI text dan state tombol berdasarkan pilihan
+        function updateSelectionUI() {
+            const selectedCount = gridOverlay.querySelectorAll('.grid-cell.selected').length;
+            selectedCountText.textContent = selectedCount;
+            
+            if (selectedCount === 0) {
+                splitBtn.disabled = true;
+                splitBtn.textContent = 'Pilih Minimal 1 Potongan';
+                splitBtn.classList.replace('bg-indigo-600', 'bg-gray-400');
+                splitBtn.classList.replace('dark:bg-indigo-500', 'dark:bg-gray-600');
+            } else if (selectedCount === 1) {
+                splitBtn.disabled = false;
+                splitBtn.textContent = 'Unduh 1 Potongan (Gambar)';
+                splitBtn.classList.replace('bg-gray-400', 'bg-indigo-600');
+                splitBtn.classList.replace('dark:bg-gray-600', 'dark:bg-indigo-500');
+            } else {
+                splitBtn.disabled = false;
+                splitBtn.textContent = `Potong & Unduh ${selectedCount} Bagian (ZIP)`;
+                splitBtn.classList.replace('bg-gray-400', 'bg-indigo-600');
+                splitBtn.classList.replace('dark:bg-gray-600', 'dark:bg-indigo-500');
+            }
+        }
+
+        // Event listener untuk tombol Pilih Semua & Batal Pilih
+        btnSelectAll.addEventListener('click', () => {
+            const cells = gridOverlay.querySelectorAll('.grid-cell');
+            cells.forEach(cell => cell.classList.add('selected'));
+            updateSelectionUI();
+        });
+
+        btnDeselectAll.addEventListener('click', () => {
+            const cells = gridOverlay.querySelectorAll('.grid-cell');
+            cells.forEach(cell => cell.classList.remove('selected'));
+            updateSelectionUI();
+        });
+
+        splitBtn.addEventListener('click', async function() {
+            if (!currentImage) return;
+
+            // Ambil daftar sel yang dipilih pengguna
+            const selectedCells = Array.from(gridOverlay.querySelectorAll('.grid-cell.selected'));
+            if (selectedCells.length === 0) {
+                showToast("Pilih minimal 1 bagian untuk diunduh!", true);
+                return;
+            }
+
+            const cols = parseInt(colsInput.value);
+            const rows = parseInt(rowsInput.value);
+            const pieceWidth = Math.floor(imgWidth / cols);
+            const pieceHeight = Math.floor(imgHeight / rows);
+
+            // Ganti teks tombol menjadi loading
+            const originalBtnText = splitBtn.innerHTML;
+            splitBtn.innerHTML = '<span class="spinner"></span> Memproses...';
+            splitBtn.disabled = true;
+
+            try {
+                const zip = new JSZip();
+                const folderName = `FadSplit_${originalFile.name.split('.')[0]}`;
+                const imgFolder = zip.folder(folderName);
+                
+                // Gunakan off-screen canvas untuk memotong (kualitas asli)
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = pieceWidth;
+                canvas.height = pieceHeight;
+
+                // Tentukan ekstensi dan format tipe MIME untuk menjaga kualitas
+                let mimeType = originalFile.type;
+                let extension = 'png'; // default fallback
+            if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') extension = 'jpg';
+            else if (mimeType === 'image/webp') extension = 'webp';
+            
+            // Proses pemotongan hanya untuk potongan yang dipilih
+            let singleBlob = null;
+            let singleFileName = "";
+            
+            for (let i = 0; i < selectedCells.length; i++) {
+                const cell = selectedCells[i];
+                const r = parseInt(cell.dataset.row);
+                const c = parseInt(cell.dataset.col);
+                
+                // Koordinat pemotongan dari sumber (gambar asli)
+                const sourceX = c * pieceWidth;
+                const sourceY = r * pieceHeight;
+                
+                // Bersihkan canvas
+                ctx.clearRect(0, 0, pieceWidth, pieceHeight);
+                
+                // Gambar potongan spesifik ke dalam canvas
+                ctx.drawImage(
+                    currentImage, 
+                    sourceX, sourceY, pieceWidth, pieceHeight, // Source
+                    0, 0, pieceWidth, pieceHeight // Destination (Canvas)
+                );
+
+                // Konversi canvas ke blob
+                const blob = await new Promise(resolve => {
+                    // Untuk JPEG dan WEBP, kita paksa quality = 1.0 (Tertinggi)
+                    canvas.toBlob(resolve, mimeType, 1.0);
+                });
+
+                // Penamaan urutan file: NamaFileAsli_Kolom|Baris (misal: Foto kenangan_1|3.jpg)
+                const originalName = originalFile.name;
+                const lastDotIndex = originalName.lastIndexOf('.');
+                const baseName = lastDotIndex !== -1 ? originalName.substring(0, lastDotIndex) : originalName;
+                const fileName = `${baseName}_${c+1}|${r+1}.${extension}`;
+                
+                if (selectedCells.length === 1) {
+                    singleBlob = blob;
+                    singleFileName = fileName;
+                } else {
+                    imgFolder.file(fileName, blob);
+                }
+            }
+
+            if (selectedCells.length === 1) {
+                // Unduh langsung sebagai gambar jika hanya 1 yang dipilih
+                saveAs(singleBlob, singleFileName);
+                showToast("Gambar berhasil diunduh!");
+            } else {
+                // Generate ZIP jika lebih dari 1
+                splitBtn.innerHTML = '<span class="spinner"></span> Menyimpan ZIP...';
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                
+                // Unduh file zip
+                saveAs(zipBlob, `${folderName}.zip`);
+                showToast(`Berhasil dipotong & diunduh ${selectedCells.length} bagian (ZIP)!`);
+            }
+            
+        } catch (error) {
+                console.error("Terjadi kesalahan:", error);
+                showToast("Gagal memproses gambar.", true);
+            } finally {
+                // Kembalikan kondisi tombol
+                splitBtn.innerHTML = originalBtnText;
+                splitBtn.disabled = false;
+            }
+        });
+
+        function showToast(message, isError = false) {
+            toastMessage.textContent = message;
+            
+            // Atur warna dan ikon berdasarkan status error atau sukses
+            if (isError) {
+                toast.className = 'absolute top-4 right-4 bg-red-600 text-white px-4 py-2 rounded shadow-lg transform transition-transform duration-300 flex items-center z-50';
+                toast.innerHTML = `<svg class="w-5 h-5 text-white mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="text-white">${message}</span>`;
+            } else {
+                toast.className = 'absolute top-4 right-4 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 px-4 py-2 rounded shadow-lg transform transition-transform duration-300 flex items-center z-50';
+                toast.innerHTML = `<svg class="w-5 h-5 text-green-400 dark:text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg><span>${message}</span>`;
+            }
+
+            // Tampilkan toast
+            toast.classList.remove('translate-y-[-150%]', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            // Sembunyikan setelah 3 detik
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-[-150%]', 'opacity-0');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
